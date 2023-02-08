@@ -1,3 +1,4 @@
+# wipecountdownbot - installation guide
 NB : If your not using a bot container :
 You will need to install python and git (must be 3.7+)
 (https://www.youtube.com/watch?v=XF_rklW9XkU&ab_channel=CBTNuggets)
@@ -70,4 +71,4 @@ For any issues message me at alexskizzy(307862931213778946) or reach out to me v
 
 Suggested hosts -> https://serverstarter.host/ or anything offering a simple bot container - Python is key!
 Support Discord -> https://discord.gg/G7BgXntn7S
-# wipecountdownbot
+
