@@ -340,9 +340,11 @@ class Document:
         self.__ensure_dict(data)
         self.__ensure_id(data)
 
-        data_id = data.pop("_id")
+        # Do not mutate the caller's server/embed dictionary while building the update.
+        update_data = deepcopy(data)
+        data_id = update_data.pop("_id")
         await self._document.update_one(
-            {"_id": data_id}, {f"${option}": data}, *args, **kwargs
+            {"_id": data_id}, {f"${option}": update_data}, *args, **kwargs
         )
 
     async def upsert_custom(
@@ -497,16 +499,18 @@ class Document:
     # <-- Private methods -->
     @staticmethod
     def __ensure_list_of_dicts(data: List[Dict]):
-        assert isinstance(data, list)
-        assert all(isinstance(entry, dict) for entry in data)
+        if not isinstance(data, list) or not all(isinstance(entry, dict) for entry in data):
+            raise TypeError("Expected a list of dictionaries")
 
     @staticmethod
     def __ensure_dict(data: Dict[str, Any]) -> None:
-        assert isinstance(data, dict)
+        if not isinstance(data, dict):
+            raise TypeError("Expected a dictionary")
 
     @staticmethod
     def __ensure_id(data: Dict[str, Any]) -> None:
-        assert "_id" in data
+        if "_id" not in data:
+            raise ValueError("Document data must contain an _id")
 
     @staticmethod
     def __convert_filter(data: Union[Dict, Any]) -> Dict:

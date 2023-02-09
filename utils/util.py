@@ -1,138 +1,129 @@
+"""Shared Discord and API helpers used by the cogs."""
+
+from __future__ import annotations
+
 import asyncio
-import json
+import logging
 import re
+
 import aiohttp
 import discord
-from dateutil.relativedelta import relativedelta
-from discord import colour, Intents
-from discord.ext.commands import ColourConverter
-from motor.motor_asyncio import AsyncIOMotorClient
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 
-class utilmisc():
-     async def send_basic_embed(
-     self,
-     ctx,
-     desc: str,
-     *,
-     color=None,
-     target=None,
-     contain_timestamp: bool = True,
-     include_command_invoker: bool = True,
-     **kwargs,
-     ) -> discord.Message:
-          """Wraps a string to send formatted as an embed"""
-          target = target or ctx.channel
-
-          embed = discord.Embed(description=desc,color=self.bot.embed_hex)
-
-          if color:
-               embed.colour = color
-
-          if contain_timestamp:
-               embed.timestamp = ctx.message.created_at
-
-          if include_command_invoker:
-               embed.set_footer(text=ctx.author.display_name, icon_url=ctx.author.avatar.url)
-
-          return await target.send(embed=embed, **kwargs)
+LOGGER = logging.getLogger(__name__)
+TIME_TOKEN = re.compile(r"(\d{1,5})\s*([hmsd])", re.IGNORECASE)
+TIME_UNITS = {"h": 3_600, "s": 1, "m": 60, "d": 86_400}
 
 
-     async def get_input(self,ctx,title: str = None,description: str = None,*,timeout: int = 100,delete_after: bool = False,author_id=None):
-          if title and not description:
-               embed = discord.Embed(
-                    title=title,
-                    colour= self.bot.embed_hex
-               )
-          elif not title and description:
-               embed = discord.Embed(
-                    description=description,
-                    colour= self.bot.embed_hex
-               )
-          elif title and description:
-               embed = discord.Embed(
-                    title=title,
-                    description=description,
-                    colour= self.bot.embed_hex
-               )
-          else:
-               raise RuntimeError("Expected atleast title or description")
+class utilmisc:
+    async def send_basic_embed(
+        self,
+        ctx,
+        desc: str,
+        *,
+        color=None,
+        target=None,
+        contain_timestamp: bool = True,
+        include_command_invoker: bool = True,
+        **kwargs,
+    ) -> discord.Message:
+        """Send a consistently styled embed."""
 
-          sent = await ctx.send(embed=embed)
-          val = None
+        target = target or ctx.channel
+        embed = discord.Embed(description=desc, colour=color or self.bot.embed_hex)
 
-          author_id = author_id or ctx.author.id or ctx.id  # or self.id for User/Member
+        if contain_timestamp:
+            embed.timestamp = ctx.message.created_at
 
-          try:
-               msg = await ctx.bot.wait_for(
-                    "message",
-                    timeout=timeout,
-                    check=lambda message: message.author.id == author_id,
-               )
-               if msg:
-                    val = msg.content
-          except asyncio.TimeoutError:
-               if delete_after:
-                    await sent.delete()
+        if include_command_invoker:
+            avatar = getattr(ctx.author.avatar, "url", None)
+            if avatar:
+                embed.set_footer(text=ctx.author.display_name, icon_url=avatar)
+            else:
+                embed.set_footer(text=ctx.author.display_name)
 
-               return val
+        return await target.send(embed=embed, **kwargs)
 
-          try:
-               if delete_after:
-                    await sent.delete()
-                    await msg.delete()
-          finally:
-               return val
+    async def get_input(
+        self,
+        ctx,
+        title: str | None = None,
+        description: str | None = None,
+        *,
+        timeout: int = 100,
+        delete_after: bool = False,
+        author_id=None,
+    ):
+        if not title and not description:
+            raise RuntimeError("Expected at least a title or description")
 
-     async def time_convertor(argument):
-          time_regex = re.compile(r"(( ?(\d{1,5})(h|s|m|d))+)")
-          time_dict = {"h": 3600, "s": 1, "m": 60, "d": 86400}
-          args = argument.lower()
-          matches = re.findall(time_regex, args)
-          if not matches:
-               return 0
+        embed = discord.Embed(title=title, description=description, colour=self.bot.embed_hex)
+        sent = await ctx.send(embed=embed)
+        author_id = author_id or ctx.author.id
 
-          matches = matches[0][0].split(" ")
-          matches = [filter(None, re.split(r"(\d+)", s)) for s in matches]
-          time = 0
-          for match in matches:
-               key, value = match
-               try:
-                    time += time_dict[value] * float(key)
-               except KeyError:
-                    raise commands.BadArgument(
-                         f"{value} is an invalid time key! h|m|s|d are valid arguments"
-                    )
-               except ValueError:
-                    raise commands.BadArgument(f"{key} is not a number!")
-          return time
+        try:
+            message = await ctx.bot.wait_for(
+                "message",
+                timeout=timeout,
+                check=lambda candidate: candidate.author.id == author_id,
+            )
+        except asyncio.TimeoutError:
+            if delete_after:
+                await sent.delete()
+            return None
 
+        if delete_after:
+            await sent.delete()
+            await message.delete()
+        return message.content
 
-     async def pop_from_bmid(id):
-          url = (f"https://api.battlemetrics.com/servers/{id}")
-          pop_info = ""
-          ConnectedPlayers = 0
-          MaxPlayers = 0
-          QueuedPlayers = 0
-          async with aiohttp.ClientSession() as session:
-               async with session.get(url) as resp:
-                    if resp.status != 200:
-                         print(f"Battlemetrics - Error with status code: {resp.status}")
-                         pop_info = f"Server didn't respond... - (`{resp.status}`)"
-                    if resp.status == 200:
-                         resp_dict = json.loads(await resp.text())
-                         try:
-                              ConnectedPlayers = resp_dict["data"]["attributes"]["players"] 
-                              MaxPlayers = resp_dict["data"]["attributes"]["maxPlayers"]
-                              QueuedPlayers = resp_dict["data"]["attributes"]["details"]["rust_queued_players"]
-                         except:
-                              pass #FallbackSince if its not a rust server id will break
-          
-          if pop_info != f"Server didn't respond... - (`{resp.status}`)":
-               if QueuedPlayers > 0:
-                    pop_info = f" : {ConnectedPlayers}/{MaxPlayers} Q:{QueuedPlayers}"
-               else:
-                    pop_info = f" : {ConnectedPlayers}/{MaxPlayers}"
-          
-          return pop_info
+    @staticmethod
+    async def time_convertor(argument: str) -> int:
+        """Convert values such as ``2h 30m`` into seconds."""
+
+        if not isinstance(argument, str):
+            raise commands.BadArgument("A duration must be text, for example `2h 30m`.")
+
+        value = argument.strip().lower()
+        matches = list(TIME_TOKEN.finditer(value))
+        if not matches or "".join(match.group(0).replace(" ", "") for match in matches) != value.replace(" ", ""):
+            raise commands.BadArgument("Use a duration such as `2h 30m`; valid units are h, m, s and d.")
+
+        return sum(int(match.group(1)) * TIME_UNITS[match.group(2).lower()] for match in matches)
+
+    @staticmethod
+    async def battlemetrics_server_exists(server_id: str | int) -> bool:
+        """Check that a BattleMetrics server record exists without blocking the bot."""
+
+        url = f"https://api.battlemetrics.com/servers/{server_id}"
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    return response.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            LOGGER.warning("BattleMetrics lookup failed for server %s", server_id)
+            return False
+
+    @staticmethod
+    async def pop_from_bmid(server_id: str | int) -> str:
+        """Return the current BattleMetrics population text for a server."""
+
+        url = f"https://api.battlemetrics.com/servers/{server_id}"
+        timeout = aiohttp.ClientTimeout(total=10)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    if response.status != 200:
+                        return f"Server did not respond... - (`{response.status}`)"
+                    payload = await response.json(content_type=None)
+                    attributes = payload["data"]["attributes"]
+                    connected = attributes["players"]
+                    maximum = attributes["maxPlayers"]
+                    queued = attributes.get("details", {}).get("rust_queued_players", 0)
+        except (aiohttp.ClientError, asyncio.TimeoutError, KeyError, TypeError, ValueError):
+            return "Server population unavailable"
+
+        suffix = f" Q:{queued}" if queued else ""
+        return f" : {connected}/{maximum}{suffix}"

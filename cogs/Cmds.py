@@ -1,16 +1,14 @@
-from multiprocessing import context
 import discord
-import datetime as dt
+import logging
 from datetime import datetime,timezone
-from dateutil.relativedelta import relativedelta
-from discord import colour, Intents
-from discord.ext.commands import ColourConverter,cooldown,BucketType
-from motor.motor_asyncio import AsyncIOMotorClient
-import requests
-from discord.ext import commands, tasks
+from discord.ext.commands import ColourConverter
+from discord.ext import commands
 from utils.util import utilmisc
 import random
 import string
+
+
+LOGGER = logging.getLogger(__name__)
 
 class EmbedOrServerCreate(discord.ui.View):
     def __init__(self,*,timeout=60):
@@ -82,7 +80,7 @@ class Cmds(commands.Cog):
 
    @commands.Cog.listener()
    async def on_ready(self):
-      print(f"{self.__class__.__name__} Cog has been loaded\n-----")
+      LOGGER.info("%s cog loaded", self.__class__.__name__)
 
 
    @commands.command()
@@ -107,6 +105,8 @@ class Cmds(commands.Cog):
 
    @commands.command()
    async def force(self,ctx):
+      if not getattr(self.bot, "force", None):
+         return await ctx.send("The force-wipe schedule is not ready yet. Please try again shortly.")
       await ctx.send(f"The next force wipe takes place <t:{int(self.bot.force)}:F> - (<t:{int(self.bot.force)}:R>)")
 
    @commands.command()
@@ -165,8 +165,7 @@ class Cmds(commands.Cog):
                      ServerIP = await utilmisc.get_input(self,ctx,description="What is the IP connect for this server?\nExample : `connect eumain.skizzyrust.com:28015`/`connect 51.195.60.74:28015`",)
                      ServerInfo = await utilmisc.get_input(self,ctx,description="Please provide any server information\nExample :\n\nMap Wipe Friday @ 5pm BST\nTeam UI : 4 Max\nMap Size : 3700",)
                      ServerBMID = await utilmisc.get_input(self,ctx, description="What is the battlemetrics ID for this server?\n> Example : **1234143** would be the id [here](https://cdn.discordapp.com/attachments/944601713023795281/973941405128986714/Screenshot_2022-05-11_at_14.35.22.png).")
-                     req = requests.get(f"https://api.battlemetrics.com/servers/{ServerBMID}")
-                     if req.status_code != 200:
+                     if not await utilmisc.battlemetrics_server_exists(ServerBMID):
                         return await ctx.send(f"> **Error** : `{ServerBMID}` is not a valid battlemetrics server ID.")
                         
 
@@ -217,11 +216,14 @@ class Cmds(commands.Cog):
                               return await ctx.send("Cancelling...")
 
                            if next_wipe.isdecimal():
-                              next_wipe = datetime.fromtimestamp(float(next_wipe))
+                              next_wipe = datetime.fromtimestamp(float(next_wipe), tz=timezone.utc)
 
                            else:
                               time = await utilmisc.time_convertor(next_wipe)
-                              next_wipe = datetime.fromtimestamp((datetime.now(timezone.utc).timestamp() + time))
+                              next_wipe = datetime.fromtimestamp(
+                                 datetime.now(timezone.utc).timestamp() + time,
+                                 tz=timezone.utc,
+                              )
 
                            if type_wipe == "biweekly" and next_wipe.weekday() != 3:
                               return await ctx.send(f"> **Error** : `{next_wipe}` was not a thursday.")
@@ -253,7 +255,7 @@ class Cmds(commands.Cog):
                            Num_Wipes = await utilmisc.get_input(self,ctx, description="How many wipes does this server have a week? eg : `2`,`3`,`4`,`5`")
                            try:
                               Num_Wipes = int(Num_Wipes)
-                           except:
+                           except (TypeError, ValueError):
                               return await ctx.send("> **Error** : That is not a number or less than 2")
                            if Num_Wipes < 2:
                               return await ctx.send("> **Error** : That is not a number or less than 2")
@@ -273,11 +275,14 @@ class Cmds(commands.Cog):
                                  return await ctx.send("Cancelling...")
 
                               if next_wipe.isdecimal():
-                                 next_wipe = datetime.fromtimestamp(float(next_wipe))
+                                 next_wipe = datetime.fromtimestamp(float(next_wipe), tz=timezone.utc)
 
                               else:
                                  time = await utilmisc.time_convertor(next_wipe)
-                                 next_wipe = datetime.fromtimestamp((datetime.now(timezone.utc).timestamp() + time))
+                                 next_wipe = datetime.fromtimestamp(
+                                    datetime.now(timezone.utc).timestamp() + time,
+                                    tz=timezone.utc,
+                                 )
                               
                               wipes.append(int(next_wipe.timestamp()))
                            data = {
@@ -301,8 +306,13 @@ class Cmds(commands.Cog):
          if type == "Embed":
             channel_id = await utilmisc.get_input(self,ctx, description="What is the channel id of the channel you want this embed in?")
 
+            try:
+               channel_id = int(channel_id)
+            except (TypeError, ValueError):
+               return await ctx.send("> **Error** : That is not a valid Discord channel ID.")
+
             guild = self.bot.get_guild(self.bot.data["Discord_Config"]["Guild_ID"])
-            channel = guild.get_channel(channel_id)
+            channel = guild.get_channel(channel_id) if guild else None
             if channel == None:
                channel = await  self.bot.fetch_channel(channel_id)       
             
@@ -378,8 +388,8 @@ class Cmds(commands.Cog):
 
                   embed_msg = await channel.fetch_message(embed["_id"])   
                   await embed_msg.delete()
-               except:
-                  pass
+               except (discord.NotFound, discord.Forbidden, discord.HTTPException, AttributeError, TypeError, ValueError):
+                  LOGGER.info("Embed message %s was already unavailable", embed.get("_id"))
 
                return await msg.edit(embed=discord.Embed(title="Confirmed",description=f"I have deleted that embed.",colour = 0x00FF00)) 
             else:
@@ -554,7 +564,7 @@ class Cmds(commands.Cog):
                if change_to:
                   try:
                      change_to = int(change_to)
-                  except:
+                  except (TypeError, ValueError):
                      return await ctx.send("> **Error** : Invalid embed ID")
                   embed = await self.bot.embeds.find_by_custom({"_id":int(change_to)})
                   if not embed:
@@ -585,13 +595,16 @@ class Cmds(commands.Cog):
                   return await ctx.send("Cancelling...")
 
                if next_wipe.isdecimal():
-                  next_wipe = datetime.fromtimestamp(float(next_wipe))
+                  next_wipe = datetime.fromtimestamp(float(next_wipe), tz=timezone.utc)
 
                else:
                   time = await utilmisc.time_convertor(next_wipe)
-                  next_wipe = datetime.fromtimestamp((datetime.now(timezone.utc).timestamp() + time))
+                  next_wipe = datetime.fromtimestamp(
+                     datetime.now(timezone.utc).timestamp() + time,
+                     tz=timezone.utc,
+                  )
 
-               if view.response[0] == "biweekly" and next_wipe.weekday() != 3:
+               if wipe["wipe_type"] == "biweekly" and next_wipe.weekday() != 3:
                   return await ctx.send(f"> **Error** : `{next_wipe}` was not a thursday.")
                
 

@@ -1,173 +1,107 @@
-import arrow
-import datetime as dt
-from datetime import datetime,timezone
-from dateutil.relativedelta import relativedelta
-from discord import colour, Intents
-from discord.ext.commands import ColourConverter
-from motor.motor_asyncio import AsyncIOMotorClient
+"""Background task that keeps stored wipe schedules up to date."""
+
+from __future__ import annotations
+
+import logging
+import time
+
 from discord.ext import commands, tasks
-from utils.util import utilmisc
-import pytz
+
+from utils.scheduling import next_force_wipe, roll_forward
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Servers(commands.Cog):
-     def __init__(self, bot):
-          self.bot = bot
-          self.server_task.start()
+    def __init__(self, bot: commands.Bot) -> None:
+        self.bot = bot
+        self.server_task.start()
 
-     @commands.Cog.listener()
-     async def on_ready(self):
-          print(f"{self.__class__.__name__} Cog has been loaded\n-----")
-          
+    def cog_unload(self) -> None:
+        self.server_task.cancel()
 
-     def check_uk_gmt_bst_xs():
-          tz = pytz.timezone('Europe/London')
-          now = datetime.now(tz)
-          if now.dst():
-               return "BST"
-          return "GMT"
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        LOGGER.info("%s cog loaded", self.__class__.__name__)
 
-     def get_force_time():    
-          month = arrow.utcnow().span("month")[0]
-          now = arrow.utcnow().timestamp()
+    @staticmethod
+    def _force_overrides(force: int, next_wipe: int, enabled: bool) -> bool:
+        return enabled and (force < next_wipe or force - next_wipe < 86_400)
 
-          while True:
-               # Start at 0 on Monday
-               day = month.weekday()
-               # First day of month
-               if day == 0:
-                    # money
-                    month = month.replace(day=4)
-               elif day == 1:
-                    # tuesday
-                    month = month.replace(day=3)
-               elif day == 2:
-                    # wednesday
-                    month = month.replace(day=2)
-               elif day == 3:
-                    # thursday
-                    pass
-               elif day == 4:
-                    # friday
-                    month = month.replace(day=7)
-               elif day == 5:
-                    # saturday
-                    month = month.replace(day=6)
-               elif day == 6:
-                    # sunday
-                    month = month.replace(day=5)
-               else:
-                    raise RuntimeError("Lol this broke msg skizzy")
+    def _refresh_server(self, server: dict, now: int) -> dict | None:
+        """Normalise one stored schedule and return it ready for MongoDB."""
 
-               s_hour = 19
-               GMT_BST = Servers.check_uk_gmt_bst_xs()
-               if GMT_BST == "GMT":
-                    s_hour = 19
-               elif GMT_BST == "BST":
-                    #BST = UTC/GMT + 1 so must take away an hour
-                    s_hour = 18
-               month = month.replace(hour=s_hour)
+        wipe_type = server.get("wipe_type")
+        force = self.bot.force
 
-               if (month.timestamp() - now) > 0:
-                    # We have a valid timestamp
-                    break
+        if wipe_type == "monthly":
+            display = int(server.get("next_wipe_display", 0))
+            if display <= now:
+                server["last_wipe"] = display
+                server["next_wipe_display"] = force
+            elif display != force:
+                server["next_wipe_display"] = force
 
-               month = month + relativedelta(months=1)
-               month = month.replace(day=1)
-               month = month.replace(hour=0)
+        elif wipe_type in {"weekly", "biweekly"}:
+            interval = 604_800 if wipe_type == "weekly" else 1_209_600
+            next_wipe = roll_forward(server.get("next_wipe", now), interval, now)
+            server["next_wipe"] = next_wipe
+            display = int(server.get("next_wipe_display", 0))
+            if display <= now:
+                server["last_wipe"] = display
+                server["next_wipe_display"] = (
+                    force
+                    if self._force_overrides(force, next_wipe, bool(server.get("WipesForce")))
+                    else next_wipe
+                )
 
-          force_time = int(month.timestamp())
-          return force_time
+        elif wipe_type == "custom":
+            wipes = [roll_forward(wipe, 604_800, now) for wipe in server.get("wipes", [])]
+            server["wipes"] = sorted(wipes)
+            if not wipes:
+                LOGGER.warning("Skipping custom server %s with no wipe dates", server.get("_id"))
+                return None
 
+            display = int(server.get("next_wipe_display", 0))
+            if display <= now:
+                next_wipe = server["wipes"][0]
+                server["last_wipe"] = display
+                server["next_wipe_display"] = (
+                    force
+                    if self._force_overrides(force, next_wipe, bool(server.get("WipesForce")))
+                    else next_wipe
+                )
 
-     @tasks.loop(seconds=10.0)
-     async def server_task(self):
-          now = arrow.utcnow().timestamp()
-          self.bot.force = Servers.get_force_time()
-          all_servers = await self.bot.wipes.get_all()
+        else:
+            LOGGER.warning("Skipping server %s with unknown wipe type %r", server.get("_id"), wipe_type)
+            return None
 
-          #Go through all servers
-          for server in all_servers:
+        return server
 
-               #Monthly (Force Wipe)
-               if server["wipe_type"] == "monthly":
-                    #CheckForNewWipe
-                    if now > int(server["next_wipe_display"]):#New
-                         server["last_wipe"] = server["next_wipe_display"]
-                         server["next_wipe_display"] = self.bot.force
-                         await self.bot.wipes.update(server)
-                    
-                    #ResetWipe to force?
-                    if int(server["next_wipe_display"]) != self.bot.force:
-                         server["next_wipe_display"] = self.bot.force
-                         await self.bot.wipes.update(server)
+    @tasks.loop(seconds=10.0)
+    async def server_task(self) -> None:
+        now = int(time.time())
+        self.bot.force = next_force_wipe()
 
-               #Anything but monthly
+        try:
+            all_servers = await self.bot.wipes.get_all()
+        except Exception:
+            LOGGER.exception("Could not load wipe schedules; retrying on the next loop")
+            return
 
-               #We must check if wipe is in the past
-               #We must check if force wipe is "enabled" and is actually the next time
-               #If force wipe is < 24 hours away it will override the wipe even if it's not the next wipe
-               else:
-                    if server["wipe_type"] == "weekly":
-                         if now > int(server["next_wipe"]):#New
-                              server["next_wipe"] += 604800 #7days
-                         
-                    elif server["wipe_type"] == "biweekly":
-                         next_wipe = server["next_wipe"]
-                         while (next_wipe - now) <= 0:
-                              gap = (dt.timedelta(weeks=2)).total_seconds()
-                              next_wipe = int(gap + next_wipe)
-                              server["next_wipe"] = next_wipe
-               
-                    elif server["wipe_type"] == "custom":
-                         w = []
-                         for wipe in server["wipes"]:
-                              if now > int(wipe):#New
-                                   wipe += 604800
-                              w.append(wipe)
-                         server["wipes"] = w
-               
-                    #Display wipe vs actual cycle (Force overriding)
-                    if server["wipe_type"] == "weekly" or server["wipe_type"] == "biweekly":
+        for server in all_servers:
+            try:
+                refreshed = self._refresh_server(server, now)
+                if refreshed is not None:
+                    await self.bot.wipes.update(refreshed)
+            except Exception:
+                LOGGER.exception("Could not refresh wipe schedule %s", server.get("_id"))
 
-                         #Wipe is in past -> New wipe 
-                         if now > server["next_wipe_display"]:
-                              server["last_wipe"] = server["next_wipe_display"]
-
-                              #If time until force is less than 24h
-                              #OR
-                              #Force is the next wipe due
-                              #AND
-                              #Force is enabled
-                              if ((self.bot.force - server["next_wipe"] < 86400) or (self.bot.force < server["next_wipe"])) and server["WipesForce"]:
-                                   server["next_wipe_display"] = self.bot.force
-                              else:
-                                   server["next_wipe_display"] = server["next_wipe"]
-                    
-                    elif server["wipe_type"] == "custom":
-                         if now > server["next_wipe_display"]:   
-                              server["last_wipe"] = server["next_wipe_display"]
-                         
-                              server["wipes"].sort()
-                              smallest = server["wipes"][0]
-
-                              #If time until force is less than 24h
-                              #OR
-                              #Force is the next wipe due
-                              #AND
-                              #Force is enabled
-                              if ((self.bot.force - smallest < 86400) or (self.bot.force < smallest)) and server["WipesForce"]:
-                                   server["next_wipe_display"] = self.bot.force
-                              else:
-                                   server["next_wipe_display"] = smallest
-                    
-                    await self.bot.wipes.update(server)
-
-
-     @server_task.before_loop
-     async def before_server_task(self):
+    @server_task.before_loop
+    async def before_server_task(self) -> None:
         await self.bot.wait_until_ready()
 
 
-async def setup(bot):
-  await bot.add_cog(Servers(bot))
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Servers(bot))
