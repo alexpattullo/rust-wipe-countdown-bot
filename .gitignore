@@ -1,2 +1,10 @@
-testconfig.json
+__pycache__/
+*.py[cod]
 .DS_Store
+
+# Local configuration and secrets
+config.json
+testconfig.json
+.env
+.env.*
+!.env.example

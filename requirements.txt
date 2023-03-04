@@ -1,8 +1,4 @@
-discord.py 
-aiohttp
-motor
-dnspython
-python-dateutil
-arrow
-requests
-pytz
+discord.py>=2.0,<3
+aiohttp>=3.8,<4
+motor>=3.0,<4
+dnspython>=2.2,<3
