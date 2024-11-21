@@ -1,74 +1,78 @@
-# wipecountdownbot - installation guide
-NB : If your not using a bot container :
-You will need to install python and git (must be 3.7+)
-(https://www.youtube.com/watch?v=XF_rklW9XkU&ab_channel=CBTNuggets)
+# Wipe Countdown Bot
 
-Also might need to install git if you get an error like this (https://i.imgur.com/1Cl6whB.png)
-https://www.linode.com/docs/guides/how-to-install-git-on-linux-mac-and-windows/
+Discord bot for managing Rust server wipe schedules and publishing live countdown embeds.
 
+## Overview
 
-1. Go to https://discord.com/developers/applications, create a new bot application
+Wipe Countdown Bot allows staff to create and manage server wipe schedules directly from Discord. It supports recurring schedules, weekly force wipes, custom wipe patterns and live BattleMetrics player counts.
 
-2. Create a bot & enable all intents -> https://imgur.com/sZtM5N3
+The project was originally developed as a commercial Rust server tool and has been prepared here as a public portfolio project.
 
-3. Go to O2Auth - > URL Generator -> Select bot & invite the bot to your discord
+## Features
 
-4. Go back to the "Bot" page & grab the token, go to the config.json file and fill in everything except from your mongo url.
+- Supports Monthly, Weekly, Biweekly and Custom wipe schedules.
+- Automatically accounts for the weekly force wipe.
+- Refreshes BattleMetrics player counts in embed messages.
+- Provides commands for creating, editing, listing and deleting servers and embeds.
+- Stores schedules and embed settings in MongoDB.
+- Includes Docker deployment with non-root execution and automatic restarts.
 
-Example Config
+## Technology
+
+- Python
+- Discord.py
+- MongoDB with Motor
+- BattleMetrics API
+- Docker and Docker Compose
+
+## Configuration
+
+Copy `.env.example` to `.env` and provide the required values:
+
+| Variable | Description |
+| --- | --- |
+| `DISCORD_BOT_TOKEN` | Discord bot token. |
+| `MONGO_URL` | MongoDB connection string. |
+| `GUILD_ID` | Discord server ID. |
+| `STAFF_ROLE_ID` | Role ID permitted to manage schedules. |
+| `BOT_PREFIX` | Command prefix, defaulting to `!`. |
+| `SERVER_NAME` | Name displayed in embeds. |
+| `EMBED_HEX_COLOR` | Embed colour, such as `#5865F2`. |
+| `MONGO_DATABASE` | Database name, defaulting to `rust_wipes`. |
+
+Secrets are loaded from environment variables and are never stored in JSON or committed to Git.
+
+## Running with Docker
+
+```bash
+cp .env.example .env
+# Fill in .env
+docker compose up -d --build
 ```
-{
-  "Misc":{
-    "Bot_Prefix":"!",
-    "Bot_Token":"TOKENHERE", <- discord bot token
-    "Server_Name":"Skizzy Rust",
-    "Embed_Hex_Color":"#FFFFFF" <- hex code (https://htmlcolorcodes.com/)
-  },
-  "Mongo_Config":{ 
-    "MONGO_URL": "" <- Mongo string
-  },
-  "Discord_Config":{
-    "Guild_ID":822170791579877468, <- Guild id of the server you want to run the bot in
-    "StaffRole_ID":895995833382748241 <- Staff role id of the role you want to be able to manage the bot
-  }
-}
+
+View logs with:
+
+```bash
+docker compose logs -f
 ```
 
-5. Create an account @ https://www.mongodb.com/cloud/atlas/register
+The Discord Message Content intent must be enabled in the Discord Developer Portal.
 
-6. Create a "Shared" Free cluster & select a region close to where the bot will be hosted (not insanely important) https://imgur.com/undefined
+## Local development
 
-7. Create a username and password - > Note the password down will be needed later, give permissions (Read and write to any database)
-
-8. Go to "Network Access" & whitelist the ip of where the bot will be hosted from. https://imgur.com/ddG362e
-
-8. Go to the Database page & click connect https://imgur.com/a/3rRV9ly
-"Connect your application" then Driver : Python & 3.7 or later  https://imgur.com/undefined
-
-9. Replace <db_username> with the username you created
-10. Replace <db_password> with your password 
-NB. Yes you must also remove the <> 
-
-String should look something like this
-
-mongodb+srv://alexskizzy:mypasswordhere@cluster0.randomidhere.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
-
-11. Enter the entire string in the config.json file under "MONGO_URL"
-
-12. If not being installed in a bot container you must install the required python packages run
-
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+python main.py
+```
 
-In the console then run the main.py file
+Run the tests with:
 
-----
+```bash
+python -m unittest discover -s tests -v
+```
 
-For a container double check your startup file is main.py not bot.py and ur requirements file is requirements.txt not something else.
+## Project status
 
-Upon startup and the bot is alive use **{prefix}create** to make a new embed/server use **{prefix}help** for a list of commands
-
-For any issues message me at alexskizzy(307862931213778946) or reach out to me via lone design / codefling tickets etc.
-
-Suggested hosts -> https://serverstarter.host/ or anything offering a simple bot container - Python is key!
-Support Discord -> https://discord.gg/G7BgXntn7S
-
+The scheduling, configuration and deployment paths have been tidied up for public presentation. Further production work would include Discord/MongoDB integration tests, database migrations and a CI pipeline.
