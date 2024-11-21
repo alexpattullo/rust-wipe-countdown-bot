@@ -1,23 +1,33 @@
-# Wipe Countdown Bot
+# Rust Wipe Countdown Bot
 
-Discord bot for managing Rust server wipe schedules and publishing live countdown embeds.
+A Python Discord bot for managing Rust server wipe schedules and publishing live countdown embeds.
 
-## Overview
+## Project overview
 
-Wipe Countdown Bot allows staff to create and manage server wipe schedules directly from Discord. It supports recurring schedules, weekly force wipes, custom wipe patterns and live BattleMetrics player counts.
+The bot allows Rust server staff to create and manage recurring wipe schedules directly from Discord. It supports weekly, biweekly, monthly and custom wipe patterns, automatically accounts for the weekly force wipe and keeps server information updated with BattleMetrics player counts.
 
-The project was originally developed as a commercial Rust server tool and has been prepared here as a public portfolio project.
+The project was developed as a commercial product and was sold over 100 times through [Codefling](https://codefling.com/discord-bots/rust-discord-automated-wipe-countdown-bot).
 
-## Features
+## Key features
 
-- Supports Monthly, Weekly, Biweekly and Custom wipe schedules.
-- Automatically accounts for the weekly force wipe.
-- Refreshes BattleMetrics player counts in embed messages.
-- Provides commands for creating, editing, listing and deleting servers and embeds.
-- Stores schedules and embed settings in MongoDB.
-- Includes Docker deployment with non-root execution and automatic restarts.
+- Create, edit, list and delete server wipe schedules.
+- Support for weekly, biweekly, monthly and custom schedules.
+- Automatic Discord timestamp countdowns in the viewer's local timezone.
+- BattleMetrics player counts and queue information in live embeds.
+- Customisable embed titles, descriptions, colours, thumbnails and footers.
+- MongoDB persistence for server and embed configuration.
 
-## Technology
+## Screenshots
+
+![Live wipe countdown embed](images/01-wipe-overview.png)
+
+![Server management flow](images/08-wipe-message.png)
+
+![Configured Discord embed](images/14-final-embed.png)
+
+The complete screenshot set is available in the [`images`](images) directory.
+
+## Technologies
 
 - Python
 - Discord.py
@@ -25,22 +35,15 @@ The project was originally developed as a commercial Rust server tool and has be
 - BattleMetrics API
 - Docker and Docker Compose
 
+## What I learned
+
+This project gave me practical experience designing a configurable application for non-technical users and maintaining it as a commercial product. I worked with asynchronous Discord events, external API requests, MongoDB persistence and time-based scheduling, including handling recurring schedules and UK daylight-saving changes.
+
+I also learned about deploying Python applications with Docker, separating secrets into environment variables and iterating on a product based on customer requirements and support requests.
+
 ## Configuration
 
-Copy `.env.example` to `.env` and provide the required values:
-
-| Variable | Description |
-| --- | --- |
-| `DISCORD_BOT_TOKEN` | Discord bot token. |
-| `MONGO_URL` | MongoDB connection string. |
-| `GUILD_ID` | Discord server ID. |
-| `STAFF_ROLE_ID` | Role ID permitted to manage schedules. |
-| `BOT_PREFIX` | Command prefix, defaulting to `!`. |
-| `SERVER_NAME` | Name displayed in embeds. |
-| `EMBED_HEX_COLOR` | Embed colour, such as `#5865F2`. |
-| `MONGO_DATABASE` | Database name, defaulting to `rust_wipes`. |
-
-Secrets are loaded from environment variables and are never stored in JSON or committed to Git.
+Copy `.env.example` to `.env` and provide the required values. Secrets are loaded from environment variables and are not stored in JSON or committed to Git.
 
 ## Running with Docker
 
@@ -48,12 +51,6 @@ Secrets are loaded from environment variables and are never stored in JSON or co
 cp .env.example .env
 # Fill in .env
 docker compose up -d --build
-```
-
-View logs with:
-
-```bash
-docker compose logs -f
 ```
 
 The Discord Message Content intent must be enabled in the Discord Developer Portal.
@@ -72,7 +69,3 @@ Run the tests with:
 ```bash
 python -m unittest discover -s tests -v
 ```
-
-## Project status
-
-The scheduling, configuration and deployment paths have been tidied up for public presentation. Further production work would include Discord/MongoDB integration tests, database migrations and a CI pipeline.
