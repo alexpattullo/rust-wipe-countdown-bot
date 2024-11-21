@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+config.json
+testconfig.json
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+venv/
+tests/
+README.md
